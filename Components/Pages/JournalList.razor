@@ -1,0 +1,413 @@
+@page "/journal"
+@using YourJournal.Services
+@using YourJournal.Models
+@using JournalEntryModel = YourJournal.Models.JournalEntry
+@inject AuthService AuthService
+@inject DatabaseService DatabaseService
+@inject NavigationManager NavigationManager
+
+@if (!AuthService.IsAuthenticated)
+{
+    NavigationManager.NavigateTo("/login", true);
+    return;
+}
+
+<div class="app-container">
+    <div class="sidebar">
+        <div class="sidebar-logo">
+            <span class="sidebar-logo-icon">📖</span>
+            <span class="sidebar-logo-text">Your Journal</span>
+        </div>
+        
+        <ul class="sidebar-menu">
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/")'>
+                <span>📊</span> Dashboard
+            </li>
+            <li class="sidebar-menu-item active" @onclick='() => NavigateTo("/journal")'>
+                <span>📝</span> Journal
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/calendar")'>
+                <span>📅</span> Calendar
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/analytics")'>
+                <span>📈</span> Analytics
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/tags")'>
+                <span>🏷️</span> Tags
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/settings")'>
+                <span>⚙️</span> Settings
+            </li>
+        </ul>
+
+        <div class="sidebar-footer">
+            <div class="sidebar-menu-item" @onclick="HandleLogout">
+                <span>🚪</span> Log Out
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="page-header">
+            <div>
+                <h1 class="page-title">Journal Entries</h1>
+                <p class="page-subtitle">View and manage all your journal entries</p>
+            </div>
+            <button class="btn btn-primary" @onclick='() => NavigateTo("/journal/new")'>
+                ➕ New Entry
+            </button>
+        </div>
+
+        <!-- Search and Filter -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 16px; align-items: end;">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">Search</label>
+                    <input type="text" @bind="searchQuery" @bind:after="SearchEntries" 
+                           class="form-control" placeholder="Search by title or content..." />
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">Mood</label>
+                    <select @bind="filterMood" @bind:after="ApplyFilters" class="form-control">
+                        <option value="">All Moods</option>
+                        <optgroup label="Positive">
+                            @foreach (var mood in MoodData.PositiveMoods)
+                            {
+                                <option value="@mood">@mood</option>
+                            }
+                        </optgroup>
+                        <optgroup label="Neutral">
+                            @foreach (var mood in MoodData.NeutralMoods)
+                            {
+                                <option value="@mood">@mood</option>
+                            }
+                        </optgroup>
+                        <optgroup label="Negative">
+                            @foreach (var mood in MoodData.NegativeMoods)
+                            {
+                                <option value="@mood">@mood</option>
+                            }
+                        </optgroup>
+                    </select>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">Sort By</label>
+                    <select @bind="sortBy" @bind:after="ApplyFilters" class="form-control">
+                        <option value="date-desc">Newest First</option>
+                        <option value="date-asc">Oldest First</option>
+                        <option value="wordcount-desc">Most Words</option>
+                        <option value="wordcount-asc">Least Words</option>
+                    </select>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(searchQuery) || !string.IsNullOrEmpty(filterMood))
+            {
+                <div style="margin-top: 16px; display: flex; gap: 12px; align-items: center;">
+                    <span style="font-size: 14px; color: var(--text-muted);">
+                        Showing @filteredEntries.Count of @totalEntries entries
+                    </span>
+                    <button class="btn-secondary" @onclick="ClearFilters" 
+                            style="padding: 6px 12px; font-size: 13px;">
+                        Clear Filters
+                    </button>
+                </div>
+            }
+        </div>
+
+        <!-- Entries List -->
+        @if (isLoading)
+        {
+            <div class="loading" style="padding: 60px; text-align: center;">
+                <p>Loading entries...</p>
+            </div>
+        }
+        else if (!paginatedEntries.Any())
+        {
+            <div class="card" style="text-align: center; padding: 60px;">
+                <span style="font-size: 48px; margin-bottom: 16px; display: block;">📝</span>
+                <h3 style="color: var(--text-muted); margin-bottom: 12px;">No entries found</h3>
+                <p style="color: var(--text-light); margin-bottom: 24px;">
+                    @if (!string.IsNullOrEmpty(searchQuery) || !string.IsNullOrEmpty(filterMood))
+                    {
+                        <span>Try adjusting your search or filters</span>
+                    }
+                    else
+                    {
+                        <span>Start writing your first journal entry</span>
+                    }
+                </p>
+                @if (string.IsNullOrEmpty(searchQuery) && string.IsNullOrEmpty(filterMood))
+                {
+                    <button class="btn btn-primary" @onclick='() => NavigateTo("/journal/new")'>
+                        Create Your First Entry
+                    </button>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="entry-list">
+                @foreach (var entry in paginatedEntries)
+                {
+                    <div class="entry-preview-card" @onclick="() => ViewEntry(entry.Id)">
+                        <div class="entry-preview-mood">
+                            @GetMoodIcon(entry.PrimaryMood)
+                        </div>
+                        <div class="entry-preview-content">
+                            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+                                <div style="flex: 1;">
+                                    @if (!string.IsNullOrEmpty(entry.Title))
+                                    {
+                                        <h3 class="entry-preview-title">@entry.Title</h3>
+                                    }
+                                    <p class="entry-preview-date">
+                                        @entry.Date.ToString("MMMM dd, yyyy") • @entry.WordCount words
+                                    </p>
+                                </div>
+                                <div style="display: flex; gap: 8px;">
+                                    <button class="btn-secondary" style="padding: 8px 16px; font-size: 13px;"
+                                            @onclick:stopPropagation="true"
+                                            @onclick="() => EditEntry(entry.Id)">
+                                        ✏️ Edit
+                                    </button>
+                                    <button class="btn-danger" style="padding: 8px 16px; font-size: 13px;"
+                                            @onclick:stopPropagation="true"
+                                            @onclick="() => DeleteEntry(entry.Id)">
+                                        🗑️
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <p style="color: var(--text-muted); line-height: 1.6; margin: 8px 0;">
+                                @(entry.Content.Length > 150 ? entry.Content.Substring(0, 150) + "..." : entry.Content)
+                            </p>
+
+                            @if (!string.IsNullOrEmpty(entry.Tags))
+                            {
+                                var tags = System.Text.Json.JsonSerializer.Deserialize<List<string>>(entry.Tags);
+                                if (tags != null && tags.Any())
+                                {
+                                    <div class="tags-container" style="margin-top: 12px;">
+                                        @foreach (var tag in tags.Take(5))
+                                        {
+                                            <span class="tag">@tag</span>
+                                        }
+                                        @if (tags.Count > 5)
+                                        {
+                                            <span class="tag">+@(tags.Count - 5) more</span>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </div>
+                        <div class="entry-preview-link">
+                            →
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <!-- Pagination -->
+            @if (totalPages > 1)
+            {
+                <div class="pagination" style="margin-top: 32px;">
+                    <button class="btn-secondary" @onclick="PreviousPage" 
+                            disabled="@(currentPage == 1)"
+                            style="padding: 10px 20px;">
+                        ← Previous
+                    </button>
+                    
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        @for (int i = 1; i <= totalPages; i++)
+                        {
+                            var pageNum = i;
+                            <button class="@(pageNum == currentPage ? "btn-primary" : "btn-secondary")" 
+                                    @onclick="() => GoToPage(pageNum)"
+                                    style="padding: 10px 16px; min-width: 44px;">
+                                @pageNum
+                            </button>
+                        }
+                    </div>
+
+                    <button class="btn-secondary" @onclick="NextPage" 
+                            disabled="@(currentPage == totalPages)"
+                            style="padding: 10px 20px;">
+                        Next →
+                    </button>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private List<JournalEntryModel> allEntries = new();
+    private List<JournalEntryModel> filteredEntries = new();
+    private List<JournalEntryModel> paginatedEntries = new();
+    private bool isLoading = true;
+    
+    // Search and Filter
+    private string searchQuery = string.Empty;
+    private string filterMood = string.Empty;
+    private string sortBy = "date-desc";
+    
+    // Pagination
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private int totalPages = 0;
+    private int totalEntries = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthService.CurrentUser != null)
+        {
+            await LoadEntries();
+        }
+    }
+
+    private async Task LoadEntries()
+    {
+        isLoading = true;
+        var userId = AuthService.CurrentUser!.Id;
+        allEntries = await DatabaseService.GetEntriesForUserAsync(userId);
+        totalEntries = allEntries.Count;
+        filteredEntries = allEntries;
+        ApplySorting();
+        UpdatePagination();
+        isLoading = false;
+        StateHasChanged();
+    }
+
+    private async Task SearchEntries()
+    {
+        await ApplyFilters();
+    }
+
+    private async Task ApplyFilters()
+    {
+        filteredEntries = allEntries;
+
+        // Apply search
+        if (!string.IsNullOrWhiteSpace(searchQuery))
+        {
+            var query = searchQuery.ToLower();
+            filteredEntries = filteredEntries
+                .Where(e => (e.Title?.ToLower().Contains(query) ?? false) ||
+                           e.Content.ToLower().Contains(query))
+                .ToList();
+        }
+
+        // Apply mood filter
+        if (!string.IsNullOrEmpty(filterMood))
+        {
+            filteredEntries = filteredEntries
+                .Where(e => e.PrimaryMood == filterMood ||
+                           e.SecondaryMood1 == filterMood ||
+                           e.SecondaryMood2 == filterMood)
+                .ToList();
+        }
+
+        ApplySorting();
+        currentPage = 1;
+        UpdatePagination();
+    }
+
+    private void ApplySorting()
+    {
+        filteredEntries = sortBy switch
+        {
+            "date-desc" => filteredEntries.OrderByDescending(e => e.Date).ToList(),
+            "date-asc" => filteredEntries.OrderBy(e => e.Date).ToList(),
+            "wordcount-desc" => filteredEntries.OrderByDescending(e => e.WordCount).ToList(),
+            "wordcount-asc" => filteredEntries.OrderBy(e => e.WordCount).ToList(),
+            _ => filteredEntries.OrderByDescending(e => e.Date).ToList()
+        };
+    }
+
+    private async Task ClearFilters()
+    {
+        searchQuery = string.Empty;
+        filterMood = string.Empty;
+        sortBy = "date-desc";
+        await ApplyFilters();
+    }
+
+    private void UpdatePagination()
+    {
+        totalPages = (int)Math.Ceiling((double)filteredEntries.Count / pageSize);
+        if (totalPages == 0) totalPages = 1;
+        if (currentPage > totalPages) currentPage = totalPages;
+        
+        paginatedEntries = filteredEntries
+            .Skip((currentPage - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+    }
+
+    private void GoToPage(int page)
+    {
+        if (page >= 1 && page <= totalPages)
+        {
+            currentPage = page;
+            UpdatePagination();
+        }
+    }
+
+    private void PreviousPage()
+    {
+        if (currentPage > 1)
+        {
+            currentPage--;
+            UpdatePagination();
+        }
+    }
+
+    private void NextPage()
+    {
+        if (currentPage < totalPages)
+        {
+            currentPage++;
+            UpdatePagination();
+        }
+    }
+
+    private string GetMoodIcon(string mood)
+    {
+        var moodData = MoodData.AllMoods.FirstOrDefault(m => m.Name == mood);
+        return moodData?.Icon ?? "😐";
+    }
+
+    private void ViewEntry(int entryId)
+    {
+        NavigateTo($"/journal/{entryId}");
+    }
+
+    private void EditEntry(int entryId)
+    {
+        NavigateTo($"/journal/{entryId}");
+    }
+
+    private async Task DeleteEntry(int entryId)
+    {
+        var entry = allEntries.FirstOrDefault(e => e.Id == entryId);
+        if (entry != null)
+        {
+            await DatabaseService.DeleteEntryAsync(entry);
+            await LoadEntries();
+        }
+    }
+
+    private void NavigateTo(string path)
+    {
+        NavigationManager.NavigateTo(path);
+    }
+
+    private void HandleLogout()
+    {
+        AuthService.Logout();
+        NavigationManager.NavigateTo("/login", true);
+    }
+}

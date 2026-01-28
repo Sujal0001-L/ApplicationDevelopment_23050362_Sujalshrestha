@@ -1,0 +1,147 @@
+@page "/signup"
+@using YourJournal.Services
+@inject AuthService AuthService
+@inject NavigationManager NavigationManager
+
+<div class="auth-container">
+    <div class="auth-card">
+        <div class="auth-logo">
+            <div class="auth-logo-icon">📖</div>
+            <h2 style="font-size: 22px; font-weight: 700; color: var(--text-dark); margin: 0;">Your Journal</h2>
+        </div>
+        
+        <h1 class="auth-title">Create your account</h1>
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="alert alert-error">@errorMessage</div>
+        }
+
+        <EditForm Model="@signupModel" OnValidSubmit="@HandleSignup">
+            <DataAnnotationsValidator />
+            
+            <div class="form-group">
+                <label class="form-label">Full Name</label>
+                <InputText @bind-Value="signupModel.FullName" class="form-control" placeholder="John Doe" />
+                <ValidationMessage For="@(() => signupModel.FullName)" />
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Email</label>
+                <InputText @bind-Value="signupModel.Email" class="form-control" placeholder="your.email@example.com" />
+                <ValidationMessage For="@(() => signupModel.Email)" />
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Password</label>
+                <InputText type="password" @bind-Value="signupModel.Password" class="form-control" placeholder="Enter your password" />
+                <ValidationMessage For="@(() => signupModel.Password)" />
+                <small style="color: #666;">Password must be at least 8 characters long.</small>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Confirm Password</label>
+                <InputText type="password" @bind-Value="signupModel.ConfirmPassword" class="form-control" placeholder="Confirm your password" />
+                <ValidationMessage For="@(() => signupModel.ConfirmPassword)" />
+            </div>
+
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" @bind="setupPin" />
+                    Set up a PIN for quick login
+                </label>
+            </div>
+
+            @if (setupPin)
+            {
+                <div class="form-group">
+                    <label class="form-label">PIN (6 digits)</label>
+                    <InputText type="password" @bind-Value="signupModel.PIN" class="form-control" maxlength="6" placeholder="Enter 6-digit PIN" />
+                </div>
+            }
+
+            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 20px;">
+                Create Account
+            </button>
+        </EditForm>
+
+        <div class="auth-divider">OR CONTINUE WITH</div>
+
+        <button class="btn btn-secondary" style="width: 100%;">
+            <span style="color: #db4437; font-weight: 700;">G</span> Sign up with Google
+        </button>
+
+        <div class="auth-footer">
+            Your journal entries are encrypted and stored locally, ensuring your privacy.
+        </div>
+
+        <div class="auth-link">
+            Already have an account? <a href="/login">Log in</a>
+        </div>
+    </div>
+</div>
+
+@code {
+    private SignupModel signupModel = new();
+    private string errorMessage = string.Empty;
+    private bool setupPin = false;
+
+    protected override void OnInitialized()
+    {
+        if (AuthService.IsAuthenticated)
+        {
+            NavigationManager.NavigateTo("/");
+        }
+    }
+
+    private async Task HandleSignup()
+    {
+        errorMessage = string.Empty;
+
+        if (signupModel.Password != signupModel.ConfirmPassword)
+        {
+            errorMessage = "Passwords do not match";
+            return;
+        }
+
+        if (setupPin && (string.IsNullOrEmpty(signupModel.PIN) || signupModel.PIN.Length != 6))
+        {
+            errorMessage = "PIN must be exactly 6 digits";
+            return;
+        }
+
+        var result = await AuthService.RegisterAsync(
+            signupModel.FullName,
+            signupModel.Email,
+            signupModel.Password,
+            setupPin ? signupModel.PIN : null);
+        
+        if (result.Success)
+        {
+            NavigationManager.NavigateTo("/login");
+        }
+        else
+        {
+            errorMessage = result.Message;
+        }
+    }
+
+    private class SignupModel
+    {
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Full name is required")]
+        public string FullName { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Email is required")]
+        [System.ComponentModel.DataAnnotations.EmailAddress(ErrorMessage = "Invalid email address")]
+        public string Email { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Password is required")]
+        [System.ComponentModel.DataAnnotations.MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
+        public string Password { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Please confirm your password")]
+        public string ConfirmPassword { get; set; } = string.Empty;
+
+        public string? PIN { get; set; }
+    }
+}

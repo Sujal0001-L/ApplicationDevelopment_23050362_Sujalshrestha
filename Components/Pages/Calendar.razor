@@ -1,0 +1,505 @@
+@page "/calendar"
+@using YourJournal.Services
+@using YourJournal.Models
+@using JournalEntryModel = YourJournal.Models.JournalEntry
+@inject AuthService AuthService
+@inject DatabaseService DatabaseService
+@inject PdfExportService PdfExportService
+@inject NavigationManager NavigationManager
+
+@if (!AuthService.IsAuthenticated)
+{
+    NavigationManager.NavigateTo("/login", true);
+    return;
+}
+
+<div class="app-container">
+    <div class="sidebar">
+        <div class="sidebar-logo">
+            <span class="sidebar-logo-icon">📖</span>
+            <span class="sidebar-logo-text">Your Journal</span>
+        </div>
+        
+        <ul class="sidebar-menu">
+            <li class="sidebar-menu-item" @onclick='() => NavigationManager.NavigateTo("/")'>
+                <span>📊</span> Dashboard
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigationManager.NavigateTo("/journal/new")'>
+                <span>📝</span> Journal
+            </li>
+            <li class="sidebar-menu-item active" @onclick='() => NavigationManager.NavigateTo("/calendar")'>
+                <span>📅</span> Calendar
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigationManager.NavigateTo("/analytics")'>
+                <span>📈</span> Analytics
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigationManager.NavigateTo("/tags")'>
+                <span>🏷️</span> Tags
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigationManager.NavigateTo("/settings")'>
+                <span>⚙️</span> Settings
+            </li>
+        </ul>
+
+        <div class="sidebar-footer">
+            <div class="sidebar-menu-item" @onclick="HandleLogout">
+                <span>🚪</span> Log Out
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <button class="btn btn-secondary" @onclick='() => NavigationManager.NavigateTo("/")' style="margin-bottom: 16px;">
+            ← Back to Dashboard
+        </button>
+        <div class="page-header">
+            <div>
+                <h1 class="page-title">Calendar View</h1>
+            </div>
+            <button class="btn btn-primary" @onclick='() => NavigationManager.NavigateTo("/journal/new")'>
+                📝 New Entry
+            </button>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px;">
+            <!-- Calendar Section -->
+            <div class="card calendar">
+                <div class="calendar-header">
+                    <button class="btn btn-secondary" @onclick="PreviousMonth">
+                        ← Previous
+                    </button>
+                    <h2 style="margin: 0; font-size: 24px; font-weight: 600;">
+                        @currentDate.ToString("MMMM yyyy")
+                    </h2>
+                    <button class="btn btn-secondary" @onclick="NextMonth">
+                        Next →
+                    </button>
+                </div>
+
+                <div class="calendar-grid" style="margin-top: 20px;">
+                    <!-- Day Headers -->
+                    @foreach (var day in new[] { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" })
+                    {
+                        <div style="text-align: center; font-weight: 600; color: #666; padding: 10px; font-size: 14px;">
+                            @day
+                        </div>
+                    }
+
+                    <!-- Empty cells for days before month starts -->
+                    @for (int i = 0; i < GetStartDayOffset(); i++)
+                    {
+                        <div class="calendar-day" style="background-color: #f5f5f5; cursor: default;"></div>
+                    }
+
+                    <!-- Calendar days -->
+                    @for (int day = 1; day <= DateTime.DaysInMonth(currentDate.Year, currentDate.Month); day++)
+                    {
+                        var date = new DateTime(currentDate.Year, currentDate.Month, day);
+                        var entry = GetEntryForDate(date);
+                        var isToday = date.Date == DateTime.Today;
+                        var hasEntry = entry != null;
+                        var moodColor = hasEntry ? GetMoodColor(entry!.PrimaryMood) : "";
+                        var dayNumber = day;
+
+                        <div class="calendar-day @(isToday ? "today" : "") @(hasEntry ? "has-entry" : "")"
+                             style="@(hasEntry ? $"background-color: {moodColor}; color: white; font-weight: 600;" : "")"
+                             @onclick="() => SelectDate(date)">
+                            <div>@day</div>
+                            @if (hasEntry)
+                            {
+                                <div style="font-size: 20px; margin-top: 5px;">
+                                    @GetMoodIcon(entry!.PrimaryMood)
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Entry Summary Section -->
+            <div class="card">
+                <div class="card-header">Entry Summary</div>
+
+                @if (selectedDate == null)
+                {
+                    <p style="text-align: center; color: #999; padding: 40px 20px;">
+                        Select a date to view entry details or create a new entry.
+                    </p>
+                }
+                else
+                {
+                    <div>
+                        <h3 style="color: var(--primary-color); margin-bottom: 15px;">
+                            @selectedDate.Value.ToString("dddd, MMMM dd, yyyy")
+                        </h3>
+
+                        @if (selectedEntry != null)
+                        {
+                            <div style="margin-bottom: 20px;">
+                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                    <span style="font-size: 32px;">@GetMoodIcon(selectedEntry.PrimaryMood)</span>
+                                    <div>
+                                        <strong>@selectedEntry.PrimaryMood</strong>
+                                        @if (!string.IsNullOrEmpty(selectedEntry.SecondaryMood1))
+                                        {
+                                            <span>, @selectedEntry.SecondaryMood1</span>
+                                        }
+                                        @if (!string.IsNullOrEmpty(selectedEntry.SecondaryMood2))
+                                        {
+                                            <span>, @selectedEntry.SecondaryMood2</span>
+                                        }
+                                    </div>
+                                </div>
+
+                                @if (!string.IsNullOrEmpty(selectedEntry.Title))
+                                {
+                                    <h4 style="margin: 15px 0 10px;">@selectedEntry.Title</h4>
+                                }
+
+                                <p style="color: #666; line-height: 1.6; margin: 10px 0;">
+                                    @(selectedEntry.Content.Length > 200 ? selectedEntry.Content.Substring(0, 200) + "..." : selectedEntry.Content)
+                                </p>
+
+                                @if (!string.IsNullOrEmpty(selectedEntry.Category))
+                                {
+                                    <div style="margin: 10px 0;">
+                                        <strong style="font-size: 12px; color: #666;">Category:</strong>
+                                        <span class="tag" style="margin-left: 5px;">@selectedEntry.Category</span>
+                                    </div>
+                                }
+
+                                @if (!string.IsNullOrEmpty(selectedEntry.Tags))
+                                {
+                                    var tags = System.Text.Json.JsonSerializer.Deserialize<List<string>>(selectedEntry.Tags);
+                                    if (tags != null && tags.Any())
+                                    {
+                                        <div style="margin: 10px 0;">
+                                            <strong style="font-size: 12px; color: #666;">Tags:</strong>
+                                            <div class="tags-container" style="margin-top: 5px;">
+                                                @foreach (var tag in tags)
+                                                {
+                                                    <span class="tag">@tag</span>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                }
+
+                                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
+                                    <small style="color: #999;">
+                                        @selectedEntry.WordCount words • 
+                                        Created @selectedEntry.CreatedAt.ToString("h:mm tt")
+                                        @if (selectedEntry.CreatedAt.Date != selectedEntry.UpdatedAt.Date || 
+                                             selectedEntry.CreatedAt.ToString("HH:mm") != selectedEntry.UpdatedAt.ToString("HH:mm"))
+                                        {
+                                            <span> • Updated @selectedEntry.UpdatedAt.ToString("h:mm tt")</span>
+                                        }
+                                    </small>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; gap: 10px;">
+                                <button class="btn btn-primary" style="flex: 1;" 
+                                        @onclick="EditSelectedEntry">
+                                    ✏️ Edit Entry
+                                </button>
+                                <button class="btn btn-danger" @onclick="DeleteSelectedEntry">
+                                    🗑️ Delete
+                                </button>
+                            </div>
+                        }
+                        else
+                        {
+                            <div style="text-align: center; padding: 20px 0;">
+                                <p style="color: #666; margin-bottom: 20px;">
+                                    No entry for this date yet.
+                                </p>
+                                <button class="btn btn-primary" @onclick="CreateEntryForSelectedDate">
+                                    ➕ Create Entry
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+
+                <!-- Filters Section -->
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+                    <h4 style="margin-bottom: 15px;">Filters</h4>
+
+                    <div class="form-group">
+                        <label class="form-label">Mood</label>
+                        <select @bind="filterMood" @bind:after="ApplyFilters" class="form-control">
+                            <option value="">Select mood(s)</option>
+                            <optgroup label="Positive">
+                                @foreach (var mood in MoodData.PositiveMoods)
+                                {
+                                    <option value="@mood">@mood</option>
+                                }
+                            </optgroup>
+                            <optgroup label="Neutral">
+                                @foreach (var mood in MoodData.NeutralMoods)
+                                {
+                                    <option value="@mood">@mood</option>
+                                }
+                            </optgroup>
+                            <optgroup label="Negative">
+                                @foreach (var mood in MoodData.NegativeMoods)
+                                {
+                                    <option value="@mood">@mood</option>
+                                }
+                            </optgroup>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Tags</label>
+                        <input type="text" @bind="filterTag" class="form-control" 
+                               placeholder="Enter tag(s)" />
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Date Range</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <input type="date" @bind="filterStartDate" class="form-control" />
+                            <input type="date" @bind="filterEndDate" class="form-control" />
+                        </div>
+                    </div>
+
+                    <button class="btn btn-primary" style="width: 100%;" @onclick="ApplyFilters">
+                        Apply Filters
+                    </button>
+
+                    @if (!string.IsNullOrEmpty(filterMood) || !string.IsNullOrEmpty(filterTag) || 
+                         filterStartDate != null || filterEndDate != null)
+                    {
+                        <button class="btn btn-secondary" style="width: 100%; margin-top: 10px;" @onclick="ClearFilters">
+                            Clear Filters
+                        </button>
+                    }
+                </div>
+
+                <!-- Export Section -->
+                <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+                    <h4 style="margin-bottom: 10px;">Export Options</h4>
+                    <p style="font-size: 12px; color: #666; margin-bottom: 15px;">
+                        Export your journal entries for @(filterStartDate != null && filterEndDate != null ? "the selected date range" : "the current month") to PDF.
+                    </p>
+                    <button class="btn btn-secondary" style="width: 100%;" @onclick="ExportToPdf" disabled="@isExporting">
+                        @if (isExporting)
+                        {
+                            <span>⏳ Exporting...</span>
+                        }
+                        else
+                        {
+                            <span>📄 Export to PDF</span>
+                        }
+                    </button>
+                    @if (!string.IsNullOrEmpty(exportMessage))
+                    {
+                        <div style="margin-top: 10px; padding: 10px; background-color: @(exportSuccess ? "#d4edda" : "#f8d7da"); 
+                                    border: 1px solid @(exportSuccess ? "#c3e6cb" : "#f5c6cb"); 
+                                    border-radius: 8px; font-size: 14px; color: @(exportSuccess ? "#155724" : "#721c24");">
+                            @exportMessage
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private DateTime currentDate = DateTime.Today;
+    private DateTime? selectedDate;
+    private JournalEntryModel? selectedEntry;
+    private List<JournalEntryModel> monthEntries = new();
+    private List<JournalEntryModel> allEntries = new();
+    
+    // Filters
+    private string filterMood = string.Empty;
+    private string filterTag = string.Empty;
+    private DateTime? filterStartDate;
+    private DateTime? filterEndDate;
+    
+    // Export
+    private bool isExporting = false;
+    private string exportMessage = string.Empty;
+    private bool exportSuccess = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthService.CurrentUser != null)
+        {
+            await LoadEntries();
+        }
+    }
+
+    private async Task LoadEntries()
+    {
+        var userId = AuthService.CurrentUser!.Id;
+        allEntries = await DatabaseService.GetEntriesForUserAsync(userId);
+        UpdateMonthEntries();
+    }
+
+    private void UpdateMonthEntries()
+    {
+        var startOfMonth = new DateTime(currentDate.Year, currentDate.Month, 1);
+        var endOfMonth = startOfMonth.AddMonths(1).AddDays(-1);
+        
+        monthEntries = allEntries
+            .Where(e => e.Date >= startOfMonth && e.Date <= endOfMonth)
+            .ToList();
+    }
+
+    private int GetStartDayOffset()
+    {
+        var firstDay = new DateTime(currentDate.Year, currentDate.Month, 1);
+        var dayOfWeek = (int)firstDay.DayOfWeek;
+        // Convert Sunday (0) to 7, then subtract 1 to make Monday = 0
+        return dayOfWeek == 0 ? 6 : dayOfWeek - 1;
+    }
+
+    private JournalEntryModel? GetEntryForDate(DateTime date)
+    {
+        return monthEntries.FirstOrDefault(e => e.Date.Date == date.Date);
+    }
+
+    private void SelectDate(DateTime date)
+    {
+        selectedDate = date;
+        selectedEntry = GetEntryForDate(date);
+        StateHasChanged();
+    }
+
+    private void PreviousMonth()
+    {
+        currentDate = currentDate.AddMonths(-1);
+        UpdateMonthEntries();
+        selectedDate = null;
+        selectedEntry = null;
+    }
+
+    private void NextMonth()
+    {
+        currentDate = currentDate.AddMonths(1);
+        UpdateMonthEntries();
+        selectedDate = null;
+        selectedEntry = null;
+    }
+
+    private string GetMoodColor(string mood)
+    {
+        if (MoodData.PositiveMoods.Contains(mood))
+            return "#00a8e8";
+        if (MoodData.NeutralMoods.Contains(mood))
+            return "#007ea7";
+        if (MoodData.NegativeMoods.Contains(mood))
+            return "#003459";
+        return "#00171f";
+    }
+
+    private string GetMoodIcon(string mood)
+    {
+        var moodData = MoodData.AllMoods.FirstOrDefault(m => m.Name == mood);
+        return moodData?.Icon ?? "😐";
+    }
+
+    private void CreateEntryForSelectedDate()
+    {
+        if (selectedDate.HasValue)
+        {
+            NavigationManager.NavigateTo($"/journal/new?date={selectedDate.Value:yyyy-MM-dd}");
+        }
+    }
+
+    private void EditSelectedEntry()
+    {
+        if (selectedEntry != null)
+        {
+            NavigationManager.NavigateTo($"/journal/{selectedEntry.Id}");
+        }
+    }
+
+    private async Task DeleteSelectedEntry()
+    {
+        if (selectedEntry != null)
+        {
+            var confirmed = true; // In production, show confirmation dialog
+            if (confirmed)
+            {
+                await DatabaseService.DeleteEntryAsync(selectedEntry);
+                await LoadEntries();
+                selectedEntry = null;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task ApplyFilters()
+    {
+        if (AuthService.CurrentUser == null)
+            return;
+
+        var moods = !string.IsNullOrEmpty(filterMood) ? new List<string> { filterMood } : null;
+        var tags = !string.IsNullOrEmpty(filterTag) ? new List<string> { filterTag } : null;
+
+        allEntries = await DatabaseService.FilterEntriesAsync(
+            AuthService.CurrentUser.Id,
+            filterStartDate,
+            filterEndDate,
+            moods,
+            tags);
+        
+        UpdateMonthEntries();
+    }
+
+    private async Task ClearFilters()
+    {
+        filterMood = string.Empty;
+        filterTag = string.Empty;
+        filterStartDate = null;
+        filterEndDate = null;
+        await LoadEntries();
+    }
+
+    private async Task ExportToPdf()
+    {
+        try
+        {
+            isExporting = true;
+            exportMessage = string.Empty;
+            StateHasChanged();
+            
+            // Determine date range for export
+            var startDate = filterStartDate ?? new DateTime(currentDate.Year, currentDate.Month, 1);
+            var endDate = filterEndDate ?? new DateTime(currentDate.Year, currentDate.Month, DateTime.DaysInMonth(currentDate.Year, currentDate.Month));
+            
+            // Export to PDF
+            var (filePath, fileName) = await PdfExportService.ExportToPdfAsync(startDate, endDate);
+            
+            exportSuccess = true;
+            exportMessage = $"✅ PDF exported to Downloads folder: {fileName}. File has been opened automatically.";
+        }
+        catch (Exception ex)
+        {
+            exportSuccess = false;
+            exportMessage = $"❌ Export failed: {ex.Message}";
+        }
+        finally
+        {
+            isExporting = false;
+            StateHasChanged();
+            
+            // Clear message after 8 seconds
+            await Task.Delay(8000);
+            exportMessage = string.Empty;
+            StateHasChanged();
+        }
+    }
+
+    private void HandleLogout()
+    {
+        AuthService.Logout();
+        NavigationManager.NavigateTo("/login", true);
+    }
+}

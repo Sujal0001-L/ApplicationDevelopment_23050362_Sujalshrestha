@@ -1,0 +1,439 @@
+@page "/analytics"
+@using YourJournal.Services
+@using YourJournal.Models
+@using JournalEntryModel = YourJournal.Models.JournalEntry
+@inject AuthService AuthService
+@inject DatabaseService DatabaseService
+@inject AnalyticsService AnalyticsService
+@inject NavigationManager NavigationManager
+
+@if (!AuthService.IsAuthenticated)
+{
+    NavigationManager.NavigateTo("/login", true);
+    return;
+}
+
+<div class="app-container">
+    <div class="sidebar">
+        <div class="sidebar-logo">
+            <span class="sidebar-logo-icon">📖</span>
+            <span class="sidebar-logo-text">Your Journal</span>
+        </div>
+        
+        <ul class="sidebar-menu">
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/")'>
+                <span>📊</span> Dashboard
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/journal")'>
+                <span>📝</span> Journal
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/calendar")'>
+                <span>📅</span> Calendar
+            </li>
+            <li class="sidebar-menu-item active" @onclick='() => NavigateTo("/analytics")'>
+                <span>📈</span> Analytics
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/tags")'>
+                <span>🏷️</span> Tags
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/settings")'>
+                <span>⚙️</span> Settings
+            </li>
+        </ul>
+
+        <div class="sidebar-footer">
+            <div class="sidebar-menu-item" @onclick="HandleLogout">
+                <span>🚪</span> Log Out
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="page-header">
+            <div>
+                <h1 class="page-title">Analytics & Insights</h1>
+                <p class="page-subtitle">Understand your journaling patterns and emotional trends</p>
+            </div>
+        </div>
+
+        <!-- Time Period Selector -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <button class="@(selectedPeriod == "7days" ? "btn-primary" : "btn-secondary")" 
+                        @onclick='() => ChangePeriod("7days")'>
+                    Last 7 Days
+                </button>
+                <button class="@(selectedPeriod == "30days" ? "btn-primary" : "btn-secondary")" 
+                        @onclick='() => ChangePeriod("30days")'>
+                    Last 30 Days
+                </button>
+                <button class="@(selectedPeriod == "90days" ? "btn-primary" : "btn-secondary")" 
+                        @onclick='() => ChangePeriod("90days")'>
+                    Last 90 Days
+                </button>
+                <button class="@(selectedPeriod == "year" ? "btn-primary" : "btn-secondary")" 
+                        @onclick='() => ChangePeriod("year")'>
+                    This Year
+                </button>
+                <button class="@(selectedPeriod == "all" ? "btn-primary" : "btn-secondary")" 
+                        @onclick='() => ChangePeriod("all")'>
+                    All Time
+                </button>
+            </div>
+        </div>
+
+        <!-- Overview Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">📝 Total Entries</div>
+                <div class="stat-value">@totalEntries</div>
+                <div class="stat-subtitle">in selected period</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-label">📊 Average Words</div>
+                <div class="stat-value">@averageWords</div>
+                <div class="stat-subtitle">per entry</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-label">📈 Total Words</div>
+                <div class="stat-value">@totalWords.ToString("N0")</div>
+                <div class="stat-subtitle">written</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-label">🏷️ Unique Tags</div>
+                <div class="stat-value">@uniqueTags</div>
+                <div class="stat-subtitle">used</div>
+            </div>
+        </div>
+
+        <!-- Mood Distribution -->
+        <div class="card" style="margin-top: 24px;">
+            <h2 class="card-header">Mood Distribution</h2>
+            
+            @if (moodDistribution.Any())
+            {
+                <div class="mood-chart" style="margin: 24px 0;">
+                    @{
+                        var maxCount = moodDistribution.Max(m => m.Value);
+                    }
+                    @foreach (var mood in moodDistribution.OrderByDescending(m => m.Value).Take(10))
+                    {
+                        var percentage = maxCount > 0 ? (double)mood.Value / maxCount * 100 : 0;
+                        var icon = GetMoodIcon(mood.Key);
+                        <div style="margin-bottom: 16px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span style="font-size: 20px;">@icon</span>
+                                    <strong>@mood.Key</strong>
+                                </div>
+                                <span style="color: var(--text-muted); font-size: 14px;">
+                                    @mood.Value @(mood.Value == 1 ? "time" : "times") (@Math.Round((double)mood.Value / totalEntries * 100, 1)%)
+                                </span>
+                            </div>
+                            <div style="background-color: var(--light-bg); height: 24px; border-radius: 12px; overflow: hidden;">
+                                <div style="background: linear-gradient(90deg, var(--primary-color), var(--secondary-color)); 
+                                            height: 100%; width: @percentage%; transition: width 0.3s ease;"></div>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <!-- Mood Category Summary -->
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 24px;">
+                    <div style="text-align: center; padding: 20px; background-color: rgba(0, 168, 232, 0.08); border-radius: 12px;">
+                        <div style="font-size: 32px; margin-bottom: 8px;">😊</div>
+                        <div style="font-size: 24px; font-weight: 700; color: var(--primary-color);">
+                            @positiveMoodCount
+                        </div>
+                        <div style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">
+                            Positive Moods
+                        </div>
+                    </div>
+                    
+                    <div style="text-align: center; padding: 20px; background-color: rgba(0, 126, 167, 0.08); border-radius: 12px;">
+                        <div style="font-size: 32px; margin-bottom: 8px;">😐</div>
+                        <div style="font-size: 24px; font-weight: 700; color: var(--secondary-color);">
+                            @neutralMoodCount
+                        </div>
+                        <div style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">
+                            Neutral Moods
+                        </div>
+                    </div>
+                    
+                    <div style="text-align: center; padding: 20px; background-color: rgba(0, 52, 89, 0.08); border-radius: 12px;">
+                        <div style="font-size: 32px; margin-bottom: 8px;">😔</div>
+                        <div style="font-size: 24px; font-weight: 700; color: var(--dark-color);">
+                            @negativeMoodCount
+                        </div>
+                        <div style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">
+                            Negative Moods
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <p style="text-align: center; color: var(--text-muted); padding: 40px;">
+                    No mood data available for the selected period
+                </p>
+            }
+        </div>
+
+        <!-- Most Used Tags -->
+        <div class="card" style="margin-top: 24px;">
+            <h2 class="card-header">Most Used Tags</h2>
+            
+            @if (tagFrequency.Any())
+            {
+                <div class="tags-container" style="margin-top: 16px;">
+                    @foreach (var tag in tagFrequency.OrderByDescending(t => t.Value).Take(20))
+                    {
+                        var percentage = (double)tag.Value / totalEntries * 100;
+                        <div class="tag" style="font-size: 14px; padding: 10px 16px;">
+                            <strong>@tag.Key</strong>
+                            <span style="color: var(--text-muted); margin-left: 8px; font-size: 12px;">
+                                @tag.Value (@Math.Round(percentage, 1)%)
+                            </span>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <p style="text-align: center; color: var(--text-muted); padding: 40px;">
+                    No tags used in the selected period
+                </p>
+            }
+        </div>
+
+        <!-- Word Count Trends -->
+        <div class="card" style="margin-top: 24px;">
+            <h2 class="card-header">Word Count Trends</h2>
+            
+            @if (wordCountTrends.Any())
+            {
+                <div style="margin-top: 24px;">
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-bottom: 24px;">
+                        <div>
+                            <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 4px;">Longest Entry</div>
+                            <div style="font-size: 28px; font-weight: 700; color: var(--primary-color);">
+                                @longestEntry words
+                            </div>
+                        </div>
+                        <div>
+                            <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 4px;">Shortest Entry</div>
+                            <div style="font-size: 28px; font-weight: 700; color: var(--secondary-color);">
+                                @shortestEntry words
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Word Count Timeline -->
+                    <div style="margin-top: 24px;">
+                        <h4 style="margin-bottom: 16px; font-size: 16px;">Recent Entries</h4>
+                        @foreach (var entry in wordCountTrends.Take(10))
+                        {
+                            var percentage = longestEntry > 0 ? (double)entry.WordCount / longestEntry * 100 : 0;
+                            <div style="margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                    <span style="font-size: 13px; color: var(--text-dark);">
+                                        @entry.Date.ToString("MMM dd, yyyy")
+                                    </span>
+                                    <span style="font-size: 13px; color: var(--text-muted);">
+                                        @entry.WordCount words
+                                    </span>
+                                </div>
+                                <div style="background-color: var(--light-bg); height: 8px; border-radius: 4px; overflow: hidden;">
+                                    <div style="background-color: var(--primary-color); height: 100%; width: @percentage%;"></div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+            else
+            {
+                <p style="text-align: center; color: var(--text-muted); padding: 40px;">
+                    No entries in the selected period
+                </p>
+            }
+        </div>
+
+        <!-- Writing Activity -->
+        <div class="card" style="margin-top: 24px;">
+            <h2 class="card-header">Writing Activity</h2>
+            
+            @if (entriesByDayOfWeek.Any())
+            {
+                <div style="margin-top: 24px;">
+                    <h4 style="margin-bottom: 16px; font-size: 16px;">Entries by Day of Week</h4>
+                    @{
+                        var maxDayCount = entriesByDayOfWeek.Max(d => d.Value);
+                    }
+                    @foreach (var day in new[] { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" })
+                    {
+                        var count = entriesByDayOfWeek.ContainsKey(day) ? entriesByDayOfWeek[day] : 0;
+                        var percentage = maxDayCount > 0 ? (double)count / maxDayCount * 100 : 0;
+                        <div style="margin-bottom: 12px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                <strong style="font-size: 14px;">@day</strong>
+                                <span style="font-size: 13px; color: var(--text-muted);">@count @(count == 1 ? "entry" : "entries")</span>
+                            </div>
+                            <div style="background-color: var(--light-bg); height: 16px; border-radius: 8px; overflow: hidden;">
+                                <div style="background: linear-gradient(90deg, var(--primary-color), var(--secondary-color)); 
+                                            height: 100%; width: @percentage%; transition: width 0.3s ease;"></div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <p style="text-align: center; color: var(--text-muted); padding: 40px;">
+                    No activity data for the selected period
+                </p>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<JournalEntryModel> entries = new();
+    private string selectedPeriod = "30days";
+    
+    // Analytics Data
+    private int totalEntries = 0;
+    private int averageWords = 0;
+    private int totalWords = 0;
+    private int uniqueTags = 0;
+    private int longestEntry = 0;
+    private int shortestEntry = 0;
+    private int positiveMoodCount = 0;
+    private int neutralMoodCount = 0;
+    private int negativeMoodCount = 0;
+    
+    private Dictionary<string, int> moodDistribution = new();
+    private Dictionary<string, int> tagFrequency = new();
+    private Dictionary<string, int> entriesByDayOfWeek = new();
+    private List<JournalEntryModel> wordCountTrends = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthService.CurrentUser != null)
+        {
+            await LoadAnalytics();
+        }
+    }
+
+    private async Task LoadAnalytics()
+    {
+        var userId = AuthService.CurrentUser!.Id;
+        var allEntries = await DatabaseService.GetEntriesForUserAsync(userId);
+        
+        // Filter by period
+        var startDate = GetStartDateForPeriod();
+        entries = allEntries.Where(e => e.Date >= startDate).ToList();
+        
+        if (!entries.Any())
+        {
+            ResetAnalytics();
+            return;
+        }
+
+        // Calculate overview stats
+        totalEntries = entries.Count;
+        totalWords = entries.Sum(e => e.WordCount);
+        averageWords = totalEntries > 0 ? totalWords / totalEntries : 0;
+        longestEntry = entries.Max(e => e.WordCount);
+        shortestEntry = entries.Min(e => e.WordCount);
+
+        // Mood distribution
+        moodDistribution = entries
+            .SelectMany(e => new[] { e.PrimaryMood, e.SecondaryMood1, e.SecondaryMood2 }
+                .Where(m => !string.IsNullOrEmpty(m)))
+            .GroupBy(m => m!)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        // Mood categories
+        positiveMoodCount = entries.Count(e => MoodData.PositiveMoods.Contains(e.PrimaryMood));
+        neutralMoodCount = entries.Count(e => MoodData.NeutralMoods.Contains(e.PrimaryMood));
+        negativeMoodCount = entries.Count(e => MoodData.NegativeMoods.Contains(e.PrimaryMood));
+
+        // Tag frequency
+        var allTags = entries
+            .Where(e => !string.IsNullOrEmpty(e.Tags))
+            .SelectMany(e => System.Text.Json.JsonSerializer.Deserialize<List<string>>(e.Tags!) ?? new List<string>());
+        
+        tagFrequency = allTags
+            .GroupBy(t => t)
+            .ToDictionary(g => g.Key, g => g.Count());
+        
+        uniqueTags = tagFrequency.Count;
+
+        // Word count trends
+        wordCountTrends = entries.OrderByDescending(e => e.Date).ToList();
+
+        // Entries by day of week
+        entriesByDayOfWeek = entries
+            .GroupBy(e => e.Date.DayOfWeek.ToString())
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        StateHasChanged();
+    }
+
+    private void ResetAnalytics()
+    {
+        totalEntries = 0;
+        averageWords = 0;
+        totalWords = 0;
+        uniqueTags = 0;
+        longestEntry = 0;
+        shortestEntry = 0;
+        positiveMoodCount = 0;
+        neutralMoodCount = 0;
+        negativeMoodCount = 0;
+        moodDistribution.Clear();
+        tagFrequency.Clear();
+        entriesByDayOfWeek.Clear();
+        wordCountTrends.Clear();
+    }
+
+    private DateTime GetStartDateForPeriod()
+    {
+        return selectedPeriod switch
+        {
+            "7days" => DateTime.Today.AddDays(-7),
+            "30days" => DateTime.Today.AddDays(-30),
+            "90days" => DateTime.Today.AddDays(-90),
+            "year" => new DateTime(DateTime.Today.Year, 1, 1),
+            "all" => DateTime.MinValue,
+            _ => DateTime.Today.AddDays(-30)
+        };
+    }
+
+    private async Task ChangePeriod(string period)
+    {
+        selectedPeriod = period;
+        await LoadAnalytics();
+    }
+
+    private string GetMoodIcon(string mood)
+    {
+        var moodData = MoodData.AllMoods.FirstOrDefault(m => m.Name == mood);
+        return moodData?.Icon ?? "😐";
+    }
+
+    private void NavigateTo(string path)
+    {
+        NavigationManager.NavigateTo(path);
+    }
+
+    private void HandleLogout()
+    {
+        AuthService.Logout();
+        NavigationManager.NavigateTo("/login", true);
+    }
+}

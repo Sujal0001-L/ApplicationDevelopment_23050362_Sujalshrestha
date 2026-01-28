@@ -1,0 +1,388 @@
+@page "/journal/new"
+@page "/journal/{EntryId:int}"
+@using YourJournal.Services
+@using YourJournal.Models
+@inject AuthService AuthService
+@inject DatabaseService DatabaseService
+@inject NavigationManager NavigationManager
+
+@if (!AuthService.IsAuthenticated)
+{
+    NavigationManager.NavigateTo("/login", true);
+    return;
+}
+
+<div class="app-container">
+    <div class="sidebar">
+        <div class="sidebar-logo">
+            <span class="sidebar-logo-icon">📖</span>
+            <span class="sidebar-logo-text">Your Journal</span>
+        </div>
+        
+        <ul class="sidebar-menu">
+            <li class="sidebar-menu-item" @onclick='() => NavigationManager.NavigateTo("/")'>
+                <span>📊</span> Dashboard
+            </li>
+            <li class="sidebar-menu-item active" @onclick='() => NavigationManager.NavigateTo("/journal")'>
+                <span>📝</span> Journal
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigationManager.NavigateTo("/calendar")'>
+                <span>📅</span> Calendar
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigationManager.NavigateTo("/analytics")'>
+                <span>📈</span> Analytics
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigationManager.NavigateTo("/tags")'>
+                <span>🏷️</span> Tags
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigationManager.NavigateTo("/settings")'>
+                <span>⚙️</span> Settings
+            </li>
+        </ul>
+
+        <div class="sidebar-footer">
+            <div class="sidebar-menu-item" @onclick="HandleLogout">
+                <span>🚪</span> Log Out
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div style="display: grid; grid-template-columns: 1fr 360px; gap: 24px;">
+            <div>
+                <div style="margin-bottom: 20px;">
+                    <button class="btn btn-secondary" @onclick='() => NavigationManager.NavigateTo("/")' style="margin-bottom: 16px;">
+                        ← Back to Dashboard
+                    </button>
+                    <div class="page-header" style="margin-bottom: 0;">
+                        <div>
+                            <h1 class="page-title">@(title ?? "Untitled")</h1>
+                        </div>
+                        <button class="btn btn-secondary" @onclick='() => NavigationManager.NavigateTo("/")' style="padding: 8px 16px;">
+                            Preview
+                        </button>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrEmpty(message))
+                {
+                    <div class="alert @(isError ? "alert-error" : "alert-success")">
+                        @message
+                    </div>
+                }
+
+                <div class="card" style="padding: 0; border: none; box-shadow: none; background: transparent;">
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <input type="text" @bind="title" class="form-control" 
+                               placeholder="Give your entry a title..." 
+                               style="font-size: 18px; font-weight: 600; border: none; padding: 0; background: transparent;" />
+                    </div>
+
+                    <div class="editor-toolbar" style="background: var(--white-color); border: 1px solid var(--border-color); border-radius: 8px 8px 0 0; padding: 8px;">
+                        <button class="editor-btn" @onclick='() => FormatText("bold")' title="Bold"><strong>B</strong></button>
+                        <button class="editor-btn" @onclick='() => FormatText("italic")' title="Italic"><em>I</em></button>
+                        <button class="editor-btn" @onclick='() => FormatText("underline")' title="Underline"><u>U</u></button>
+                        <button class="editor-btn" @onclick='() => InsertLink()' title="Link">🔗</button>
+                        <button class="editor-btn" @onclick='() => FormatText("insertUnorderedList")' title="Bullet List">•</button>
+                        <button class="editor-btn" @onclick='() => FormatText("insertOrderedList")' title="Numbered List">1.</button>
+                        <button class="editor-btn" @onclick='() => FormatText("formatBlock", "pre")' title="Code">&lt;&gt;</button>
+                        <button class="editor-btn" title="Image">🖼️</button>
+                        <button class="editor-btn" @onclick='() => FormatText("undo")' title="Undo">↶</button>
+                        <button class="editor-btn" @onclick='() => FormatText("redo")' title="Redo">↷</button>
+                    </div>
+
+                    <textarea @bind="content" class="form-control" 
+                             placeholder="Write your thoughts here..." 
+                             rows="20"
+                             style="border-radius: 0 0 8px 8px; border-top: none; font-size: 15px; line-height: 1.7; min-height: 500px;"></textarea>
+                    
+                    <div style="text-align: right; margin-top: 8px; color: var(--text-muted); font-size: 13px;">
+                        @wordCount words
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="card" style="margin-bottom: 20px;">
+                    <h3 class="card-header" style="font-size: 16px; margin-bottom: 8px;">Moods</h3>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">Primary (1), Secondary (up to 2)</p>
+
+                    <div class="mood-grid" style="grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                        @foreach (var mood in MoodData.AllMoods.Take(6))
+                        {
+                            <div class="mood-item @(IsSelectedMood(mood.Name) ? "selected" : "")" 
+                                 @onclick="() => SelectMood(mood.Name)"
+                                 style="padding: 10px 8px;">
+                                <div class="mood-icon" style="font-size: 24px; margin-bottom: 4px;">@mood.Icon</div>
+                                <div class="mood-name" style="font-size: 11px;">@mood.Name</div>
+                            </div>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(primaryMood))
+                    {
+                        <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-color);">
+                            <div class="tags-container" style="gap: 6px;">
+                                <span class="tag">@primaryMood <span class="tag-remove" @onclick='() => primaryMood = string.Empty'>×</span></span>
+                                @if (!string.IsNullOrEmpty(secondaryMood1))
+                                {
+                                    <span class="tag">@secondaryMood1 <span class="tag-remove" @onclick='() => secondaryMood1 = string.Empty'>×</span></span>
+                                }
+                                @if (!string.IsNullOrEmpty(secondaryMood2))
+                                {
+                                    <span class="tag">@secondaryMood2 <span class="tag-remove" @onclick='() => secondaryMood2 = string.Empty'>×</span></span>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="card" style="margin-bottom: 20px;">
+                    <h3 class="card-header" style="font-size: 16px; margin-bottom: 12px;">Category</h3>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <select @bind="category" class="form-control" style="font-size: 14px;">
+                            <option value="">Select category</option>
+                            @foreach (var cat in Categories.AllCategories)
+                            {
+                                <option value="@cat">@cat</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-bottom: 20px;">
+                    <h3 class="card-header" style="font-size: 16px; margin-bottom: 12px;">Tags</h3>
+                    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                        <input type="text" @bind="newTag" @onkeypress="HandleTagKeyPress" 
+                               class="form-control" placeholder="Add new tags..." style="flex: 1; font-size: 14px;" />
+                        <button class="btn btn-primary" @onclick="AddTag" style="padding: 8px 16px;">Add</button>
+                    </div>
+
+                    @if (selectedTags.Any())
+                    {
+                        <div class="tags-container" style="margin-bottom: 12px;">
+                            @foreach (var tag in selectedTags)
+                            {
+                                <span class="tag">@tag <span class="tag-remove" @onclick="() => RemoveTag(tag)">×</span></span>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <div class="card" style="margin-bottom: 20px;">
+                    <h3 class="card-header" style="font-size: 16px; margin-bottom: 8px;">Timestamps</h3>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 8px;">
+                        <strong>Created:</strong> @DateTime.Now.ToString("MMMM dd, yyyy 'at' h:mm tt")
+                    </p>
+                    <p style="font-size: 13px; color: var(--text-muted); margin: 0;">
+                        <strong>Last Updated:</strong> @DateTime.Now.ToString("MMMM dd, yyyy 'at' h:mm tt")
+                    </p>
+                </div>
+
+                <button class="btn btn-primary" @onclick="SaveEntry" style="width: 100%; margin-bottom: 12px;">
+                    Save Entry
+                </button>
+                
+                @if (EntryId.HasValue)
+                {
+                    <button class="btn btn-danger" @onclick="DeleteEntry" style="width: 100%; margin-bottom: 12px;">
+                        Delete Entry
+                    </button>
+                }
+                
+                <button class="btn btn-secondary" @onclick='() => NavigationManager.NavigateTo("/")' style="width: 100%;">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public int? EntryId { get; set; }
+
+    private string title = string.Empty;
+    private string content = string.Empty;
+    private string primaryMood = string.Empty;
+    private string secondaryMood1 = string.Empty;
+    private string secondaryMood2 = string.Empty;
+    private string? category;
+    private List<string> selectedTags = new();
+    private string newTag = string.Empty;
+    private string message = string.Empty;
+    private bool isError = false;
+    private int wordCount = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (EntryId.HasValue)
+        {
+            await LoadEntry();
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        CalculateWordCount();
+    }
+
+    private async Task LoadEntry()
+    {
+        var entry = await DatabaseService.GetEntryByIdAsync(EntryId!.Value);
+        if (entry != null)
+        {
+            title = entry.Title ?? string.Empty;
+            content = entry.Content;
+            primaryMood = entry.PrimaryMood;
+            secondaryMood1 = entry.SecondaryMood1 ?? string.Empty;
+            secondaryMood2 = entry.SecondaryMood2 ?? string.Empty;
+            category = entry.Category;
+
+            if (!string.IsNullOrEmpty(entry.Tags))
+            {
+                selectedTags = System.Text.Json.JsonSerializer.Deserialize<List<string>>(entry.Tags) ?? new();
+            }
+        }
+    }
+
+    private void SelectMood(string mood)
+    {
+        if (string.IsNullOrEmpty(primaryMood))
+        {
+            primaryMood = mood;
+        }
+        else if (primaryMood == mood)
+        {
+            // Deselect if clicking same mood
+            primaryMood = string.Empty;
+        }
+        else if (string.IsNullOrEmpty(secondaryMood1))
+        {
+            secondaryMood1 = mood;
+        }
+        else if (secondaryMood1 == mood)
+        {
+            secondaryMood1 = string.Empty;
+        }
+        else if (string.IsNullOrEmpty(secondaryMood2))
+        {
+            secondaryMood2 = mood;
+        }
+        else if (secondaryMood2 == mood)
+        {
+            secondaryMood2 = string.Empty;
+        }
+        else
+        {
+            // Replace secondary mood 2 if all slots are filled
+            secondaryMood2 = mood;
+        }
+    }
+
+    private bool IsSelectedMood(string mood)
+    {
+        return mood == primaryMood || mood == secondaryMood1 || mood == secondaryMood2;
+    }
+
+    private void AddTag()
+    {
+        if (!string.IsNullOrWhiteSpace(newTag) && !selectedTags.Contains(newTag))
+        {
+            selectedTags.Add(newTag.Trim());
+            newTag = string.Empty;
+        }
+    }
+
+    private void RemoveTag(string tag)
+    {
+        selectedTags.Remove(tag);
+    }
+
+    private void HandleTagKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            AddTag();
+        }
+    }
+
+    private void CalculateWordCount()
+    {
+        wordCount = string.IsNullOrWhiteSpace(content) ? 0 :
+            content.Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries).Length;
+    }
+
+    private async Task SaveEntry()
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            message = "Content cannot be empty";
+            isError = true;
+            return;
+        }
+
+        if (string.IsNullOrEmpty(primaryMood))
+        {
+            message = "Please select at least one mood";
+            isError = true;
+            return;
+        }
+
+        var entry = new JournalEntry
+        {
+            UserId = AuthService.CurrentUser!.Id,
+            Date = DateTime.Today,
+            Title = string.IsNullOrWhiteSpace(title) ? null : title,
+            Content = content,
+            PrimaryMood = primaryMood,
+            SecondaryMood1 = string.IsNullOrWhiteSpace(secondaryMood1) ? null : secondaryMood1,
+            SecondaryMood2 = string.IsNullOrWhiteSpace(secondaryMood2) ? null : secondaryMood2,
+            Category = category,
+            Tags = selectedTags.Any() ? System.Text.Json.JsonSerializer.Serialize(selectedTags) : null
+        };
+
+        if (EntryId.HasValue)
+        {
+            entry.Id = EntryId.Value;
+        }
+
+        await DatabaseService.SaveEntryAsync(entry);
+        message = "Entry saved successfully!";
+        isError = false;
+
+        await Task.Delay(1000);
+        NavigationManager.NavigateTo("/");
+    }
+
+    private async Task DeleteEntry()
+    {
+        if (!EntryId.HasValue)
+            return;
+
+        var entry = await DatabaseService.GetEntryByIdAsync(EntryId.Value);
+        if (entry != null)
+        {
+            await DatabaseService.DeleteEntryAsync(entry);
+            NavigationManager.NavigateTo("/");
+        }
+    }
+
+    private void FormatText(string command, string? value = null)
+    {
+        // This would require JS interop for rich text editing
+        // For now, we're using a textarea which doesn't support formatting
+        // You could implement markdown shortcuts here
+    }
+
+    private void InsertLink()
+    {
+        // Implement link insertion
+    }
+
+    private void HandleLogout()
+    {
+        AuthService.Logout();
+        NavigationManager.NavigateTo("/login", true);
+    }
+}

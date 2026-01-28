@@ -1,0 +1,20 @@
+﻿@inherits LayoutComponentBase
+@inject IJSRuntime JSRuntime
+
+@Body
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                var theme = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "theme") ?? "light";
+                var effectiveTheme = theme == "auto" ? "light" : theme;
+                await JSRuntime.InvokeVoidAsync("document.documentElement.setAttribute", "data-theme", effectiveTheme);
+            }
+            catch { }
+        }
+    }
+}

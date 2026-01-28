@@ -1,0 +1,382 @@
+@page "/tags"
+@using YourJournal.Services
+@using YourJournal.Models
+@using JournalEntryModel = YourJournal.Models.JournalEntry
+@inject AuthService AuthService
+@inject DatabaseService DatabaseService
+@inject NavigationManager NavigationManager
+
+@if (!AuthService.IsAuthenticated)
+{
+    NavigationManager.NavigateTo("/login", true);
+    return;
+}
+
+<div class="app-container">
+    <div class="sidebar">
+        <div class="sidebar-logo">
+            <span class="sidebar-logo-icon">📖</span>
+            <span class="sidebar-logo-text">Your Journal</span>
+        </div>
+        
+        <ul class="sidebar-menu">
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/")'>
+                <span>📊</span> Dashboard
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/journal")'>
+                <span>📝</span> Journal
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/calendar")'>
+                <span>📅</span> Calendar
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/analytics")'>
+                <span>📈</span> Analytics
+            </li>
+            <li class="sidebar-menu-item active" @onclick='() => NavigateTo("/tags")'>
+                <span>🏷️</span> Tags
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/settings")'>
+                <span>⚙️</span> Settings
+            </li>
+        </ul>
+
+        <div class="sidebar-footer">
+            <div class="sidebar-menu-item" @onclick="HandleLogout">
+                <span>🚪</span> Log Out
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="page-header">
+            <div>
+                <h1 class="page-title">Tags Management</h1>
+                <p class="page-subtitle">Organize and explore your tags</p>
+            </div>
+        </div>
+
+        <!-- Stats Overview -->
+        <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+            <div class="stat-card">
+                <div class="stat-label">🏷️ Total Tags</div>
+                <div class="stat-value">@allTags.Count</div>
+                <div class="stat-subtitle">across all entries</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-label">📝 Tagged Entries</div>
+                <div class="stat-value">@taggedEntriesCount</div>
+                <div class="stat-subtitle">of @totalEntriesCount total</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-label">⭐ Most Used</div>
+                <div class="stat-value">@mostUsedTag</div>
+                <div class="stat-subtitle">@mostUsedCount @(mostUsedCount == 1 ? "time" : "times")</div>
+            </div>
+        </div>
+
+        <!-- Search Tags -->
+        <div class="card" style="margin-top: 24px;">
+            <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Search Tags</label>
+                <input type="text" @bind="searchQuery" @bind:after="FilterTags" 
+                       class="form-control" placeholder="Search by tag name..." />
+            </div>
+        </div>
+
+        <!-- Tags Grid -->
+        @if (isLoading)
+        {
+            <div class="loading" style="padding: 60px; text-align: center;">
+                <p>Loading tags...</p>
+            </div>
+        }
+        else if (!filteredTags.Any())
+        {
+            <div class="card" style="margin-top: 24px; text-align: center; padding: 60px;">
+                <span style="font-size: 48px; margin-bottom: 16px; display: block;">🏷️</span>
+                <h3 style="color: var(--text-muted); margin-bottom: 12px;">
+                    @if (!string.IsNullOrEmpty(searchQuery))
+                    {
+                        <span>No tags found</span>
+                    }
+                    else
+                    {
+                        <span>No tags yet</span>
+                    }
+                </h3>
+                <p style="color: var(--text-light);">
+                    @if (!string.IsNullOrEmpty(searchQuery))
+                    {
+                        <span>Try a different search term</span>
+                    }
+                    else
+                    {
+                        <span>Tags will appear here as you add them to your entries</span>
+                    }
+                </p>
+            </div>
+        }
+        else
+        {
+            <div class="card" style="margin-top: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2 class="card-header" style="margin-bottom: 0;">All Tags (@filteredTags.Count)</h2>
+                    <select @bind="sortBy" @bind:after="SortTags" class="form-control" style="width: auto;">
+                        <option value="frequency">Most Used</option>
+                        <option value="name">Alphabetical</option>
+                        <option value="recent">Recently Used</option>
+                    </select>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px;">
+                    @foreach (var tagInfo in filteredTags)
+                    {
+                        <div class="card" style="padding: 20px; cursor: pointer; transition: all 0.2s;"
+                             @onclick="() => ViewEntriesWithTag(tagInfo.Tag)">
+                            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+                                <div style="flex: 1;">
+                                    <h4 style="font-size: 16px; font-weight: 600; margin-bottom: 4px; color: var(--primary-color);">
+                                        🏷️ @tagInfo.Tag
+                                    </h4>
+                                    <p style="font-size: 13px; color: var(--text-muted);">
+                                        Used @tagInfo.Count @(tagInfo.Count == 1 ? "time" : "times")
+                                    </p>
+                                </div>
+                            </div>
+
+                            @if (tagInfo.RecentEntries.Any())
+                            {
+                                <div style="padding-top: 12px; border-top: 1px solid var(--border-color);">
+                                    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">Recent entries:</p>
+                                    @foreach (var entry in tagInfo.RecentEntries.Take(3))
+                                    {
+                                        <div style="font-size: 12px; color: var(--text-dark); margin-bottom: 4px; 
+                                                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                            • @(string.IsNullOrEmpty(entry.Title) ? entry.Date.ToString("MMM dd, yyyy") : entry.Title)
+                                        </div>
+                                    }
+                                </div>
+                            }
+
+                            <div style="margin-top: 12px;">
+                                <div style="background-color: var(--light-bg); height: 4px; border-radius: 2px; overflow: hidden;">
+                                    @{
+                                        var percentage = maxTagCount > 0 ? (double)tagInfo.Count / maxTagCount * 100 : 0;
+                                    }
+                                    <div style="background-color: var(--primary-color); height: 100%; width: @percentage%;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Selected Tag Details Modal -->
+        @if (!string.IsNullOrEmpty(selectedTag))
+        {
+            <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
+                        background-color: rgba(0, 0, 0, 0.5); z-index: 1000; 
+                        display: flex; align-items: center; justify-content: center; padding: 20px;"
+                 @onclick="CloseTagDetails">
+                <div class="card" style="max-width: 800px; width: 100%; max-height: 80vh; overflow-y: auto;"
+                     @onclick:stopPropagation="true">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h2 style="margin: 0;">🏷️ @selectedTag</h2>
+                        <button class="btn-secondary" @onclick="CloseTagDetails">✕ Close</button>
+                    </div>
+
+                    <p style="color: var(--text-muted); margin-bottom: 24px;">
+                        Found in @selectedTagEntries.Count @(selectedTagEntries.Count == 1 ? "entry" : "entries")
+                    </p>
+
+                    <div class="entry-list">
+                        @foreach (var entry in selectedTagEntries)
+                        {
+                            <div class="entry-preview-card" @onclick="() => ViewEntry(entry.Id)">
+                                <div class="entry-preview-mood">
+                                    @GetMoodIcon(entry.PrimaryMood)
+                                </div>
+                                <div class="entry-preview-content">
+                                    @if (!string.IsNullOrEmpty(entry.Title))
+                                    {
+                                        <h3 class="entry-preview-title">@entry.Title</h3>
+                                    }
+                                    <p class="entry-preview-date">
+                                        @entry.Date.ToString("MMMM dd, yyyy") • @entry.WordCount words
+                                    </p>
+                                    <p style="color: var(--text-muted); line-height: 1.6; margin: 8px 0;">
+                                        @(entry.Content.Length > 120 ? entry.Content.Substring(0, 120) + "..." : entry.Content)
+                                    </p>
+                                </div>
+                                <div class="entry-preview-link">→</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<JournalEntryModel> allEntries = new();
+    private List<TagInfo> allTags = new();
+    private List<TagInfo> filteredTags = new();
+    private bool isLoading = true;
+    
+    private string searchQuery = string.Empty;
+    private string sortBy = "frequency";
+    private int totalEntriesCount = 0;
+    private int taggedEntriesCount = 0;
+    private string mostUsedTag = "N/A";
+    private int mostUsedCount = 0;
+    private int maxTagCount = 0;
+    
+    private string selectedTag = string.Empty;
+    private List<JournalEntryModel> selectedTagEntries = new();
+
+    public class TagInfo
+    {
+        public string Tag { get; set; } = string.Empty;
+        public int Count { get; set; }
+        public DateTime LastUsed { get; set; }
+        public List<JournalEntryModel> RecentEntries { get; set; } = new();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthService.CurrentUser != null)
+        {
+            await LoadTags();
+        }
+    }
+
+    private async Task LoadTags()
+    {
+        isLoading = true;
+        var userId = AuthService.CurrentUser!.Id;
+        allEntries = await DatabaseService.GetEntriesForUserAsync(userId);
+        
+        totalEntriesCount = allEntries.Count;
+        taggedEntriesCount = allEntries.Count(e => !string.IsNullOrEmpty(e.Tags));
+
+        // Build tag info
+        var tagDict = new Dictionary<string, List<JournalEntryModel>>();
+        
+        foreach (var entry in allEntries)
+        {
+            if (!string.IsNullOrEmpty(entry.Tags))
+            {
+                var tags = System.Text.Json.JsonSerializer.Deserialize<List<string>>(entry.Tags);
+                if (tags != null)
+                {
+                    foreach (var tag in tags)
+                    {
+                        if (!tagDict.ContainsKey(tag))
+                        {
+                            tagDict[tag] = new List<JournalEntryModel>();
+                        }
+                        tagDict[tag].Add(entry);
+                    }
+                }
+            }
+        }
+
+        allTags = tagDict.Select(kvp => new TagInfo
+        {
+            Tag = kvp.Key,
+            Count = kvp.Value.Count,
+            LastUsed = kvp.Value.Max(e => e.UpdatedAt),
+            RecentEntries = kvp.Value.OrderByDescending(e => e.Date).Take(5).ToList()
+        }).ToList();
+
+        if (allTags.Any())
+        {
+            var topTag = allTags.OrderByDescending(t => t.Count).First();
+            mostUsedTag = topTag.Tag;
+            mostUsedCount = topTag.Count;
+            maxTagCount = topTag.Count;
+        }
+
+        filteredTags = allTags;
+        SortTags();
+        isLoading = false;
+        StateHasChanged();
+    }
+
+    private void FilterTags()
+    {
+        if (string.IsNullOrWhiteSpace(searchQuery))
+        {
+            filteredTags = allTags;
+        }
+        else
+        {
+            var query = searchQuery.ToLower();
+            filteredTags = allTags
+                .Where(t => t.Tag.ToLower().Contains(query))
+                .ToList();
+        }
+        SortTags();
+    }
+
+    private void SortTags()
+    {
+        filteredTags = sortBy switch
+        {
+            "frequency" => filteredTags.OrderByDescending(t => t.Count).ToList(),
+            "name" => filteredTags.OrderBy(t => t.Tag).ToList(),
+            "recent" => filteredTags.OrderByDescending(t => t.LastUsed).ToList(),
+            _ => filteredTags.OrderByDescending(t => t.Count).ToList()
+        };
+        StateHasChanged();
+    }
+
+    private void ViewEntriesWithTag(string tag)
+    {
+        selectedTag = tag;
+        var tagInfo = allTags.FirstOrDefault(t => t.Tag == tag);
+        selectedTagEntries = tagInfo?.RecentEntries.OrderByDescending(e => e.Date).ToList() ?? new();
+        
+        // Get all entries with this tag, not just recent
+        selectedTagEntries = allEntries
+            .Where(e => {
+                if (string.IsNullOrEmpty(e.Tags)) return false;
+                var tags = System.Text.Json.JsonSerializer.Deserialize<List<string>>(e.Tags);
+                return tags?.Contains(tag) ?? false;
+            })
+            .OrderByDescending(e => e.Date)
+            .ToList();
+    }
+
+    private void CloseTagDetails()
+    {
+        selectedTag = string.Empty;
+        selectedTagEntries.Clear();
+    }
+
+    private void ViewEntry(int entryId)
+    {
+        NavigationManager.NavigateTo($"/journal/{entryId}");
+    }
+
+    private string GetMoodIcon(string mood)
+    {
+        var moodData = MoodData.AllMoods.FirstOrDefault(m => m.Name == mood);
+        return moodData?.Icon ?? "😐";
+    }
+
+    private void NavigateTo(string path)
+    {
+        NavigationManager.NavigateTo(path);
+    }
+
+    private void HandleLogout()
+    {
+        AuthService.Logout();
+        NavigationManager.NavigateTo("/login", true);
+    }
+}

@@ -1,0 +1,248 @@
+﻿@page "/"
+@using YourJournal.Services
+@using YourJournal.Models
+@using JournalEntryModel = YourJournal.Models.JournalEntry
+@inject AuthService AuthService
+@inject DatabaseService DatabaseService
+@inject AnalyticsService AnalyticsService
+@inject NavigationManager NavigationManager
+
+@if (!AuthService.IsAuthenticated)
+{
+    <div class="loading">
+        <p>Redirecting to login...</p>
+    </div>
+    NavigationManager.NavigateTo("/login", true);
+    return;
+}
+
+<div class="app-container">
+    <div class="sidebar">
+        <div class="sidebar-logo">
+            <span class="sidebar-logo-icon">📖</span>
+            <span class="sidebar-logo-text">Your Journal</span>
+        </div>
+        
+        <ul class="sidebar-menu">
+            <li class="sidebar-menu-item active" @onclick='() => NavigateTo("/")'>
+                <span>📊</span> Dashboard
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/journal")'>
+                <span>📝</span> Journal
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/calendar")'>
+                <span>📅</span> Calendar
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/analytics")'>
+                <span>📈</span> Analytics
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/tags")'>
+                <span>🏷️</span> Tags
+            </li>
+            <li class="sidebar-menu-item" @onclick='() => NavigateTo("/settings")'>
+                <span>⚙️</span> Settings
+            </li>
+        </ul>
+
+        <div class="sidebar-footer">
+            <div class="sidebar-menu-item" @onclick="HandleLogout">
+                <span>🚪</span> Log Out
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="page-header">
+            <div>
+                <h1 class="page-title">Welcome, @(AuthService.CurrentUser?.FullName?.Split(' ')[0] ?? "User")!</h1>
+                <p class="page-subtitle">Your journaling journey at a glance.</p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div class="search-icon">🔍</div>
+                <div class="user-avatar">
+                    👤
+                </div>
+                <button class="btn btn-primary" @onclick='() => NavigateTo("/journal/new")'>
+                    📋 New Entry
+                </button>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label"><span>🔥</span> Current Streak</div>
+                <div class="stat-value">@currentStreak<span style="font-size: 20px; font-weight: 500; margin-left: 8px;">Days</span></div>
+                <div class="stat-subtitle">Consecutive days of journaling</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-label"><span>🏆</span> Longest Streak</div>
+                <div class="stat-value">@longestStreak<span style="font-size: 20px; font-weight: 500; margin-left: 8px;">Days</span></div>
+                <div class="stat-subtitle">Your best run of consistency</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-label"><span>📅</span> Missed Days</div>
+                <div class="stat-value">@missedDays<span style="font-size: 20px; font-weight: 500; margin-left: 8px;">Days</span></div>
+                <div class="stat-subtitle">Days without an entry this month</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-label"><span>⏰</span> Today's Entry</div>
+                <div class="stat-value" style="font-size: 28px;">@(hasTodayEntry ? "✅ Done" : "Pending")</div>
+                <div class="stat-subtitle">Time to write, @(AuthService.CurrentUser?.FullName?.Split(' ')[0] ?? "there")!</div>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 24px;">
+            <div class="card">
+                <div class="card-header">
+                    Recent Entries
+                    <span style="cursor: pointer; font-size: 14px; color: var(--primary-color); font-weight: 500;" @onclick='() => NavigateTo("/journal")'>
+                        View All →
+                    </span>
+                </div>
+                
+                @if (recentEntries == null)
+                {
+                    <div class="loading">Loading...</div>
+                }
+                else if (!recentEntries.Any())
+                {
+                    <p style="text-align: center; color: #999; padding: 40px 0;">No entries yet. Start your journaling journey!</p>
+                }
+                else
+                {
+                    @foreach (var entry in recentEntries.Take(4))
+                    {
+                        <div class="entry-item" @onclick='() => NavigateTo($"/journal/{entry.Id}")'>
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span style="font-size: 18px;">@GetMoodIcon(entry.PrimaryMood)</span>
+                                    <span class="entry-item-title">@(entry.Title ?? "Untitled Entry")</span>
+                                </div>
+                                <span class="entry-item-date">@entry.Date.ToString("MMM dd, yyyy")</span>
+                            </div>
+                            <p style="color: #666; font-size: 14px; margin: 0;">
+                                @(entry.Content.Length > 150 ? entry.Content.Substring(0, 150) + "..." : entry.Content)
+                            </p>
+                            <div style="margin-top: 8px;">
+                                @if (!string.IsNullOrEmpty(entry.Tags))
+                                {
+                                    var tags = System.Text.Json.JsonSerializer.Deserialize<List<string>>(entry.Tags);
+                                    if (tags != null)
+                                    {
+                                        @foreach (var tag in tags.Take(3))
+                                        {
+                                            <span class="tag">@tag</span>
+                                        }
+                                    }
+                                }
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+
+            <div class="card">
+                <div class="card-header">Mood Summary</div>
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">Distribution of your moods over the last 7 days</p>
+                
+                @if (moodDistribution != null && totalEntries > 0)
+                {
+                    <div style="margin: 24px 0;">
+                        @foreach (var mood in moodDistribution)
+                        {
+                            var percentage = totalEntries > 0 ? (mood.Value * 100.0 / totalEntries) : 0;
+                            var color = mood.Key == "Positive" ? "#10b981" : 
+                                       mood.Key == "Neutral" ? "#6b7280" : 
+                                       mood.Key == "Negative" ? "#ef4444" : "#6b7280";
+                            
+                            <div style="margin-bottom: 16px;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                                    <span style="font-size: 13px; font-weight: 600; color: var(--text-dark);">@mood.Key</span>
+                                    <span style="font-size: 13px; color: var(--text-muted);">@mood.Value</span>
+                                </div>
+                                <div style="background-color: var(--light-bg); height: 8px; border-radius: 4px; overflow: hidden;">
+                                    <div style="background-color: @color; height: 100%; width: @percentage%; transition: width 0.3s;"></div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <div style="text-align: center; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+                        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 4px;">Most frequent mood</p>
+                        <p style="font-size: 20px; font-weight: 700; color: var(--text-dark); margin: 0;">
+                            @GetDominantMood()
+                        </p>
+                    </div>
+                }
+                else
+                {
+                    <p style="text-align: center; color: var(--text-muted); padding: 40px 0;">No mood data available</p>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<JournalEntryModel>? recentEntries;
+    private int currentStreak;
+    private int longestStreak;
+    private int missedDays;
+    private bool hasTodayEntry;
+    private Dictionary<string, int>? moodDistribution;
+    private int totalEntries;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthService.CurrentUser != null)
+        {
+            await LoadDashboardData();
+        }
+    }
+
+    private async Task LoadDashboardData()
+    {
+        var userId = AuthService.CurrentUser!.Id;
+        
+        recentEntries = await DatabaseService.GetEntriesForUserAsync(userId);
+        currentStreak = await AnalyticsService.GetCurrentStreakAsync();
+        longestStreak = await AnalyticsService.GetLongestStreakAsync();
+        missedDays = await AnalyticsService.GetMissedDaysAsync(30);
+        
+        var todayEntry = await DatabaseService.GetEntryByDateAsync(userId, DateTime.Today);
+        hasTodayEntry = todayEntry != null;
+        
+        var sevenDaysAgo = DateTime.Today.AddDays(-7);
+        moodDistribution = await AnalyticsService.GetMoodDistributionAsync(sevenDaysAgo, DateTime.Today);
+        totalEntries = moodDistribution.Values.Sum();
+    }
+
+    private string GetMoodIcon(string mood)
+    {
+        var moodData = MoodData.AllMoods.FirstOrDefault(m => m.Name == mood);
+        return moodData?.Icon ?? "😐";
+    }
+
+    private string GetDominantMood()
+    {
+        if (moodDistribution == null || !moodDistribution.Any())
+            return "N/A";
+        
+        var dominant = moodDistribution.OrderByDescending(kvp => kvp.Value).First();
+        return $"{dominant.Key}: {dominant.Value}";
+    }
+
+    private void NavigateTo(string path)
+    {
+        NavigationManager.NavigateTo(path);
+    }
+
+    private void HandleLogout()
+    {
+        AuthService.Logout();
+        NavigationManager.NavigateTo("/login", true);
+    }
+}
